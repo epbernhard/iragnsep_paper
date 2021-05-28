@@ -17,6 +17,18 @@ class modelToSED:
 		self.z = z
 		self.nuLnu = nuLnu
 
+	def ISOPHTC100(self):
+		filename = 'ISOPHTC100Filter.csv'
+
+		path = os.path.dirname(iragnsep.__file__)+'/Filters/'
+		filt = pd.read_csv(path+filename)  # (Energy Counter)
+		filt_wav = filt.lambda_ang*1e-4 #Micron (Window of the filter)
+		filt_QE = filt.QE # Quantum Efficiency
+
+		flux = getFluxInFilt(filt_wav, filt_QE, self.lambda_mic, self.nuLnu, self.z)
+
+		return flux #Jy
+
 	def IRAC1(self):
 		filename = 'IRAC1Filter.csv'
 
@@ -257,10 +269,3 @@ class modelToSED:
 		flux = getFluxInFilt(filt_wav, filt_QE, self.lambda_mic, self.nuLnu, self.z)
 
 		return flux #Jy
-
-
-
-
-
-
-

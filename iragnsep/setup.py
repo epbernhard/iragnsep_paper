@@ -7,7 +7,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="iragnsep", # Replace with your own username
-    version="7.2.0",
+    version="7.3.0",
     author="Emmanuel Bernhard",
     author_email="manu.p.bernhard@gmail.com",
     description="Fits of IR SEDs, including AGN contribution.",

@@ -1,7 +1,7 @@
 ###################################
 # Example of how to use iragnsep. #
 # In this example we fit the      # 
-# galaxy mrk1066, first including #
+# galaxy IC5063, first including  #
 # the IRS data and then based on  #
 # broadband photometry only.      #
 ###################################
@@ -12,19 +12,15 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 
-# Import iragnsep
-# import iragnsep
-
 from iragnsep import run_all
 
-import pdb
 
-# redshift of mrk1066
+# redshift of IC5063 
 z = 0.011
 
-######
-# Fit with IRS spectra
-#####
+# ######
+# # Fit with IRS spectra
+# #####
 
 # IRS spectra data
 spec = pd.read_csv('./IC5063_IRS.csv')
@@ -59,14 +55,14 @@ S9p7 = 0.2 # Here, we fix S9p7 as it is low, and iragnsep struggles to infer low
 # Keyword used here:
 # z: redshift
 # UL: indicates which of the photometric fluxes need to be set as an upper limit for the fits.
-# Nmc: numbers of MCMC to perform. The more the better. 10000 is just converged, 50000 is good.
+# Nmc: numbers of MCMC to perform. The more the better. 20000 is just converged, 50000 is good.
 # saveRes: If set to True, save the plots and the tables at pathFig+sourceName_fitRes_spec.pdf and pathFig+sourceName_fitRes_spec.csv, respectively.
 
 res, resBM = run_all.fitSpec(wavIRS_fit, fluxIRS_fit, efluxIRS_fit, \
 							 wav, flux, eflux, \
 							 filters, \
 							 z = z, \
-							 Nmc = 50000, \
+							 Nmc = 20000, \
 							 S9p7_fixed = S9p7, \
 							 ULPhot = UL_phot, \
 							 sourceName = 'IC5063', \
@@ -80,7 +76,7 @@ res, resBM = run_all.fitSpec(wavIRS_fit, fluxIRS_fit, efluxIRS_fit, \
 
 # Print the best model SFR and the AIC weighted average SFR.
 print('***************************')
-print('The SFR of IC5063 is ', np.round(np.sum(res['wSFR']),2), 'Msun/yr.') # The sum of the weighted SFR is used (statistically better than just using the best model).
+print('The SFR of IC5063 is ', np.round(np.sum(res['SFR'].values*res['Aw'].values),2), 'Msun/yr.') # The sum of the SFRs, weighted by the Akaike weights is used (statistically better than just using the best model).
 print('***************************')
 
 ##################################################################
@@ -107,20 +103,20 @@ filters_data = filters[flux.flatten() > 0.]
 
 # The observed wavelengths [wav_data], observed fluxes [flux_data], and their uncertainties [eflux_data] are fed to iragnsep (INPUT).
 # The module run_all contains functions that fits, compare the models, analyse the results and plots.
-# In particular, since we have photometry data alone of mrk1066, we use the function fitPhoto of the module run_all.
+# In particular, since we have photometry data alone of IC5063, we use the function fitPhoto of the module run_all.
 
 # Keyword used here:
 # z: redshift
 # UL: indicates which of the fluxes need to be set as an upper limit in the fits. UL has to be of the same length as the data.
 # 	  Here we define the flux at 160 micron as upper limit.
-# Nmc: numbers of MCMC to perform. The more the better. 10000 is good for photometric fits.
+# Nmc: numbers of MCMC to perform. The more the better. 20000 is good for photometric fits.
 # We know the value of S9p7, so we feed it to iragnsep
 # saveRes:If set to True, save the plots and the tables at pathFig+sourceName_fitRes_photo.pdf and pathFig+sourceName_fitRes_photo.csv, respectively.
 res, resBM = run_all.fitPhoto(wav_data, flux_data, eflux_data, \
 							  filters, \
 							  z = z, \
 							  UL = UL, \
-							  Nmc = 10000, \
+							  Nmc = 20000, \
 							  S9p7 = S9p7, \
 						  	  sourceName = 'IC5063', \
 						  	  pathTable = './', \
@@ -133,7 +129,5 @@ res, resBM = run_all.fitPhoto(wav_data, flux_data, eflux_data, \
 
 # Print the best model SFR and the AIC weighted average SFR.
 print('***************************')
-print('The SFR of IC5063 is ', np.round(np.sum(res['wSFR']),2), 'Msun/yr.')
+print('The SFR of IC5063 is ', np.round(np.sum(res['SFR'].values*res['Aw'].values),2), 'Msun/yr.')
 print('***************************')
-
-
