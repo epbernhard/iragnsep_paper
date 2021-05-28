@@ -16,6 +16,8 @@ from scipy.stats import truncnorm
 
 import matplotlib.pyplot as plt
 
+import pdb
+
 #########################################################
 #														#
 #		SPECTROPHOTOMETRIC VERSION OF THE FITTING		#
@@ -68,12 +70,12 @@ def lnpostfn_spec_noAGN(theta, P, modelDust, modelPAH, y, ey, UL, wei):
 	
 	# Upper Limits
 	x = (ym[UL == 1.] - y[UL == 1.])/y[UL == 1.]/np.sqrt(2) * 3.
-	cdf = np.prod((1. - (0.5 * (1. + nberf(x))))*wei[UL == 1.])
+	cdf = np.prod((1. - (0.5 * (1. + nberf(x)))))
 
 	if cdf == 0.:	
 		logl += -1e10
 	else:
-		logl += np.log(cdf)
+		logl += np.sum(np.log((1. - (0.5 * (1. + nberf(x)))))*wei[UL == 1.])
 
 	# Detected fluxes
 	logl += np.sum(-0.5 * ((y[UL == 0.] - ym[UL == 0.])/(ey[UL == 0.]))**2. * wei[UL == 0.])
@@ -175,12 +177,12 @@ def lnpostfn_spec_wAGN(theta, P, modelDust, modelPAH, modelSi, y, ey, UL, wei, z
 
 	# Upper Limits
 	x = (ym[UL == 1.] - y[UL == 1.])/y[UL == 1.]/np.sqrt(2) * 3.
-	cdf = np.prod((1. - (0.5 * (1. + nberf(x))))*wei[UL == 1.])
+	cdf = np.prod((1. - (0.5 * (1. + nberf(x)))))
 
 	if cdf == 0.:	
 		logl += -1e10
 	else:
-		logl += np.log(cdf)
+		logl += np.sum(np.log((1. - (0.5 * (1. + nberf(x)))))*wei[UL == 1.])
 
 	# Detected fluxes
 	logl += np.sum(-0.5 * ((y[UL == 0.] - ym[UL == 0.])/(ey[UL == 0.]))**2. * wei[UL == 0.])

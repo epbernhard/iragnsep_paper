@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: iragnsep
-Version: 7.3.0
+Version: 7.3.1
 Summary: Fits of IR SEDs including AGN contribution.
 Home-page: https://tinyurl.com/y9phjhxy
 Author: Emmanuel Bernhard
@@ -212,7 +212,7 @@ Description: # iragnsep
         
         ## Change log
         
-        V7.2.0 => V7.3.0:
+        V7.2.z => V7.3.z:
         - Fixed typo in the formulae for upper limits while calculating likelihood.
         - Improved the display of figures.
         - plot 3 sigma uncertainties to better visualise what iragnsep is "seeing" in the fit.

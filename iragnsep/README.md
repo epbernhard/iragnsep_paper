@@ -204,7 +204,7 @@ The first official released version starts at x=7.
 
 ## Change log
 
-V7.2.0 => V7.3.0:
+V7.2.z => V7.3.z:
 - Fixed typo in the formulae for upper limits while calculating likelihood.
 - Improved the display of figures.
 - plot 3 sigma uncertainties to better visualise what iragnsep is "seeing" in the fit.
