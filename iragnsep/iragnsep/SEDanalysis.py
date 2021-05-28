@@ -16,8 +16,6 @@ from scipy.stats import truncnorm
 
 import matplotlib.pyplot as plt
 
-import pdb
-
 #########################################################
 #														#
 #		SPECTROPHOTOMETRIC VERSION OF THE FITTING		#
