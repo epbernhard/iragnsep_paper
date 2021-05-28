@@ -208,7 +208,7 @@ V7.2.z => V7.3.z:
 - Fixed typo in the formulae for upper limits while calculating likelihood.
 - Improved the display of figures.
 - plot 3 sigma uncertainties to better visualise what iragnsep is "seeing" in the fit.
-- improved the tables reporting the results of the fits.
+- Improved the tables reporting the results of the fits.
 - Included the possibility to perform fits with minimum FIR (or upper limits only; longer than 100 microns) data. For these SFRs are returned as upper limits.
 - Included the possibility to perform fits with minimum MIR data for the photometric version. For these, the AGN templates are excluded, and SFRs are returned as upper limits.
 
