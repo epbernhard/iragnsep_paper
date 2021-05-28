@@ -7,6 +7,7 @@ iragnsep/func.py
 iragnsep/iragnsep_templ.csv
 iragnsep/run_all.py
 iragnsep/toolplot.py
+iragnsep.egg-info/.DS_Store
 iragnsep.egg-info/PKG-INFO
 iragnsep.egg-info/SOURCES.txt
 iragnsep.egg-info/dependency_links.txt
@@ -25,6 +26,7 @@ iragnsep/Filters/IRAS100Filter.csv
 iragnsep/Filters/IRAS12Filter.csv
 iragnsep/Filters/IRAS25Filter.csv
 iragnsep/Filters/IRAS60Filter.csv
+iragnsep/Filters/ISOPHTC100Filter.csv
 iragnsep/Filters/MIPS160Filter.csv
 iragnsep/Filters/MIPS24Filter.csv
 iragnsep/Filters/MIPS70Filter.csv
@@ -34,7 +36,6 @@ iragnsep/Filters/PACS70Filter.csv
 iragnsep/Filters/SPIRE250psFilter.csv
 iragnsep/Filters/SPIRE350psFilter.csv
 iragnsep/Filters/SPIRE500psFilter.csv
-iragnsep/Filters/Spitz_i4.csv
 iragnsep/Filters/WISE_W1Filter.csv
 iragnsep/Filters/WISE_W2Filter.csv
 iragnsep/Filters/WISE_W3Filter.csv

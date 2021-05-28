@@ -2,19 +2,23 @@ import numpy as np
 import pandas as pd
 import os
 import emcee
-import scipy
 import math
 import numba
 import iragnsep
+import astropy
 
 from emcee import EnsembleSampler
 from .func import S9p7toTau9p7, getExtCurve, calc_S9p7, contmodel, Simodel, nuLnuToFnu, exctractBestModel
 from .classes import modelToSED
 from numba import njit, vectorize
+from astropy import stats
+from scipy.stats import truncnorm
+
+import matplotlib.pyplot as plt
 
 #########################################################
 #														#
-#		PHOTOMETRIC + SPEC VERSION OF THE FITTING		#
+#		SPECTROPHOTOMETRIC VERSION OF THE FITTING		#
 #														#
 #########################################################
 @vectorize(nopython=True)
@@ -24,7 +28,7 @@ def nberf(x):
     ------------
     :param x: x-value
     ------------
-    :return erf(x): speak by itself.
+    :return erf(x): speaks for itself.
     """
 	return math.erf(x)
 
@@ -62,26 +66,32 @@ def lnpostfn_spec_noAGN(theta, P, modelDust, modelPAH, y, ey, UL, wei):
 	# Define the model knowing the parameters theta
 	ym = 10**(theta[0] + P[0][0]) * modelDust + 10**(theta[1] + P[1][0]) * modelPAH
 	
-	# loglikelihood of the upper Limits
-	x = 3.*(ym[UL == 1.] - y[UL == 1.])/y[UL == 1.]/np.sqrt(2)
-	logl += np.sum(1. - (0.5 * (1. + nberf(x))) * wei[UL == 1.])
+	# Upper Limits
+	x = (ym[UL == 1.] - y[UL == 1.])/y[UL == 1.]/np.sqrt(2) * 3.
+	cdf = np.prod((1. - (0.5 * (1. + nberf(x))))*wei[UL == 1.])
 
-	# loglikelihood of the detected fluxes
-	logl += np.sum(-0.5 * ((y[UL == 0.] - ym[UL == 0.])/ey[UL == 0.])**2. * wei[UL == 0.])
+	if cdf == 0.:	
+		logl += -1e10
+	else:
+		logl += np.log(cdf)
+
+	# Detected fluxes
+	logl += np.sum(-0.5 * ((y[UL == 0.] - ym[UL == 0.])/(ey[UL == 0.]))**2. * wei[UL == 0.])
 
 	return logl
 
 # Numba wrapper
 @njit(fastmath=True)
-def lnpostfn_spec_wAGN(theta, P, modelDust, modelPAH, y, ey, UL, wei, z, wavFit, obsC, x_red):
+def lnpostfn_spec_wAGN(theta, P, modelDust, modelPAH, modelSi, y, ey, UL, wei, z, wavFit, obsC, x_red):
 
 	"""
     This function calculates the log-likelihood between spectral + photometric data and model that includes AGN contribution.
     ------------
     :param theta: vector containing the parameters.
     :param P: vector containing the priors for each of the parameters.
-    :param modelDust: model dust continuum template.
-    :param modelPAH: model PAH template.
+    :param modelDust: dust continuum template.
+    :param modelPAH: PAH template.
+    :param modelSi: Silicate emission template.
     :param y: observed fluxes.
     :param ey: uncertainties on the observed fluxes.
     :param UL: vector contaning the upper-limits, if any.
@@ -121,7 +131,7 @@ def lnpostfn_spec_wAGN(theta, P, modelDust, modelPAH, y, ey, UL, wei, z, wavFit,
 	else:
 		return -np.inf
 
-	# Normal prior on alpha 3
+	# # Normal prior on alpha 3
 	if -3.5 < theta[5] + P[3][0] < 1.:
 		logl += -0.5*(theta[5]/P[3][1])**2.
 	else:
@@ -144,7 +154,7 @@ def lnpostfn_spec_wAGN(theta, P, modelDust, modelPAH, y, ey, UL, wei, z, wavFit,
 
 	# Calculate the AGN model given the parameters theta
 	# To increase the speed, the AGN model is calculated on a reduced wavelength vector which only probes the main features (i.e. breaks and peaks).
-	# The linear part are interpolated.
+	# The linear parts are interpolated.
 	lbreak_red = 10**np.arange(np.log10(max(30., theta[8] + P[5][0] - 10.)), np.log10(max(30., theta[8] + P[5][0] + 20.)), 0.05)
 	lbreak_red[-1] = wavFit[-1]
 	x_red_wlbreak = np.zeros(len(x_red)+len(lbreak_red))
@@ -152,28 +162,30 @@ def lnpostfn_spec_wAGN(theta, P, modelDust, modelPAH, y, ey, UL, wei, z, wavFit,
 	x_red_wlbreak[:len(x_red)] = x_red
 	x_red_wlbreak[len(x_red):] = lbreak_red
 
-	modelSi11 = 10**(theta[6] + P[4][0]) * Simodel(x_red_wlbreak, 11., theta[7])
-	modelSi18 = 10**(theta[6] + P[4][0]) * Simodel(x_red_wlbreak, 18., theta[7])
 	modelPL = 10**(theta[2] + P[2][0]) * contmodel(np.array([theta[8] + P[5][0], theta[3] + P[3][0], theta[4] + P[3][0], theta[5] + P[3][0]]) , x_red_wlbreak)
 
-	# Sum all the components of the AGN model
-	modelAGN = modelSi11 + modelSi18 + modelPL
+	# Shifted silicate emission
+	modelSi_shift = 10**(theta[6] + P[4][0]) * np.interp(wavFit - theta[7], wavFit, modelSi)
+
 	# Interpolate at the observed wavelengths
-	modelAGNFit = 10**np.interp(np.log10(wavFit/(1.+z)), np.log10(x_red_wlbreak), np.log10(modelAGN))
+	modelAGNFit = 10**np.interp(np.log10(wavFit/(1.+z)), np.log10(x_red_wlbreak), np.log10(modelPL)) + modelSi_shift
 
 	# Calculate the model for the AGN+galaxy given parameters theta.
 	ym = modelAGNFit * obsC + 10**(theta[0] + P[0][0]) * modelDust + 10**(theta[1] + P[1][0]) * modelPAH
 
-	# loglikelihood of the upper Limits
-	x = 3.*(ym[UL == 1.] - y[UL == 1.])/y[UL == 1.]/np.sqrt(2)
-	logl += np.sum(1. - (0.5 * (1. + nberf(x))) * wei[UL == 1.])
+	# Upper Limits
+	x = (ym[UL == 1.] - y[UL == 1.])/y[UL == 1.]/np.sqrt(2) * 3.
+	cdf = np.prod((1. - (0.5 * (1. + nberf(x))))*wei[UL == 1.])
 
-	# loglikelihood of the detected fluxes
-	logl += np.sum(-0.5 * ((y[UL == 0.] - ym[UL == 0.])/ey[UL == 0.])**2. * wei[UL == 0.])
+	if cdf == 0.:	
+		logl += -1e10
+	else:
+		logl += np.log(cdf)
+
+	# Detected fluxes
+	logl += np.sum(-0.5 * ((y[UL == 0.] - ym[UL == 0.])/(ey[UL == 0.]))**2. * wei[UL == 0.])
 
 	return logl
-
-
 
 def runSEDspecFit(wavSpec, fluxSpec, efluxSpec,\
 				  wavPhot, fluxPhot, efluxPhot, \
@@ -210,12 +222,13 @@ def runSEDspecFit(wavSpec, fluxSpec, efluxSpec,\
     :keyword ExtCurve: pass the name of the extinction curve to use. Default = 'iragnsep'.
     :keyword Nmc: numer of MCMC run. Default = 10000.
     :keyword pgrbar: if set to 1, display a progress bar while fitting the SED. Default = 1.
-    :keyword Pdust: normal prior on the log-normalisation of the galaxy dust continuum template. Default = [10., 3.] ([mean, std dev]).
-    :keyword PPAH: normal prior on the log-normalisation of the PAH template. Default = [9., 3.] ([mean, std dev]).
+    :keyword Pdust: normal prior on the log-normalisation of the galaxy dust continuum template. Default = [11., 3.] ([mean, std dev]).
+    :keyword PPAH: normal prior on the log-normalisation of the PAH template. Default = [9.7, 3.] ([mean, std dev]).
 	:keyword Ppl: normal prior on the log-normalisation AGN continuum (defined at 10 micron). Default = [-1., 3.] ([mean, std dev]).
 	:keyword Palpha: normal prior on the three slopes alpha of the AGN continuum model. Default = [0., 1.] ([mean, std dev]).
-	:keyword Pbreak: prior on lbreak, the position of the break. Default = [40., 1.] ([mean, std dev]).
+	:keyword Pbreak: prior on lbreak, the position of the break. Default = [40., 10.] ([mean, std dev]).
 	:keyword PSi: prior on silicate emission. Default = [-1., 3.] ([mean, std dev]).
+	:keyword templ: the templates used for the fits. Default: iragnsep templates.
 	------------
     :return res_fit: dataframe containing the results of all the possible fits.
     :return res_fitBM: dataframe containing the results of the best fit only.
@@ -405,7 +418,6 @@ def runSEDspecFit(wavSpec, fluxSpec, efluxSpec,\
 
 		# Set the ensemble sampler of Goodman&Weare and run the MCMC for Nmc steps.
 		sampler = EnsembleSampler(nwalkers, ndim, lnpostfn_spec_noAGN, \
-								  moves=[emcee.moves.StretchMove(a = 2.)],\
 								  args = (np.array([Pdust, PPAH]), modelDust, modelPAH, fluxFit, efluxFit, \
 								  UL, wei))
 		sampler.run_mcmc(parms, Nmc, progress=bool(pgrbar))
@@ -415,7 +427,7 @@ def runSEDspecFit(wavSpec, fluxSpec, efluxSpec,\
 		chain = sampler.get_chain(discard=NburnIn, thin=10, flat=True)
 		dfChain = pd.DataFrame(chain)
 		dfChain.columns = ['logNormDust', 'logNormPAH']
-		
+
 		# Save the optimised parameters. Median of the posterior as best fitting value and std dev as 1sigma uncertainties.
 		# Dust continuum
 		logNorm_Dust_perTempl.append(dfChain['logNormDust'].median())
@@ -448,6 +460,7 @@ def runSEDspecFit(wavSpec, fluxSpec, efluxSpec,\
 		logNorm_Si_perTempl.append(-99.)
 		elogNorm_Si_perTempl.append(-99.)
 
+		# Shift of the peak for the siicate emission
 		dSi_perTempl.append(-99.)
 		edSi_perTempl.append(-99.)
 
@@ -474,7 +487,7 @@ def runSEDspecFit(wavSpec, fluxSpec, efluxSpec,\
 
 		# Fit including the full AGN model.
 		ndim = 9 # Number of parms
-		nwalkers = int(2. * ndim) # Number of walkers
+		nwalkers = int(2.* ndim) # Number of walkers
 
 		# Define the starting parms. Each of them has been normalised to a mean of zero to ease convergence.
 		parms = np.zeros(shape=(nwalkers, ndim))
@@ -488,16 +501,18 @@ def runSEDspecFit(wavSpec, fluxSpec, efluxSpec,\
 		parms[:,7] = np.random.uniform(low = -0.3, high = 0.3, size=nwalkers) # Si shift
 		parms[:,8] = np.random.uniform(low = -5., high = 5., size=nwalkers) # Break
 
+		modelSi11 = Simodel(wavFit/(1.+z), 11., 0.)
+		modelSi18 = Simodel(wavFit/(1.+z), 18., 0.)
+		modelSi = modelSi18 + modelSi11
+
 		# Set the ensemble sample of Goodman&Weare and run the MCMC for Nmc steps
 		sampler = EnsembleSampler(nwalkers, ndim, lnpostfn_spec_wAGN, \
-								  moves=[emcee.moves.StretchMove(a = 2.)],\
 								  args = (np.array([Pdust, PPAH, PPL, Palpha, PSi, Pbreak]), \
-								  modelDust, modelPAH, fluxFit, efluxFit, UL, wei, z, wavFit, obsPerWav_AGN, x_red))
+								  modelDust, modelPAH, modelSi, fluxFit, efluxFit, UL, wei, z, wavFit, obsPerWav_AGN, x_red))
 		sampler.run_mcmc(parms, Nmc, progress=bool(pgrbar))
 
 		# Build the flat chain after burning 20% of the chain and thinning to every 10 values.
 		chain = sampler.get_chain(discard=NburnIn, thin=10, flat=True)
-
 		dfChain = pd.DataFrame(chain)
 		dfChain.columns = ['logNormDust', 'logNormPAH', 'logNormAGN', 'alpha1', 'alpha2', 'alpha3', 'logNormSi', 'dSi', 'lBreak']
 
@@ -550,7 +565,7 @@ def runSEDspecFit(wavSpec, fluxSpec, efluxSpec,\
 						  l_break_PL_perTempl[-1],\
 						  ])
 		Pr = np.array([Pdust, PPAH, PPL, Palpha, PSi, Pbreak])
-		logl = lnpostfn_spec_wAGN(theta, Pr, modelDust, modelPAH, fluxFit, efluxFit, UL, wei, z, wavFit, obsPerWav_AGN, x_red)
+		logl = lnpostfn_spec_wAGN(theta, Pr, modelDust, modelPAH, modelSi, fluxFit, efluxFit, UL, wei, z, wavFit, obsPerWav_AGN, x_red)
 		logl_perTempl.append(logl)
 
 		# AGNon = 1 since AGN is accounted for
@@ -593,7 +608,7 @@ def runSEDspecFit(wavSpec, fluxSpec, efluxSpec,\
 #												#
 #################################################
 @njit(fastmath=True)
-def lnpostfn_photo_noAGN(theta, P, modelDust, modelPAH, UL, y, ey, wei):
+def lnpostfn_photo_noAGN(theta, P, modelDust, modelPAH, UL, y, ey):
 
 	"""
     This function calculates the log-likelihood between photometric data and model without AGN contribution.
@@ -605,11 +620,9 @@ def lnpostfn_photo_noAGN(theta, P, modelDust, modelPAH, UL, y, ey, wei):
     :param UL: vector contaning the upper-limits, if any.
     :param y: observed fluxes.
     :param ey: uncertainties on the observed fluxes.
-    :param wei: weighting of the data points.
     ------------
     :return logl: log-likelihood of the model knowing the parameters theta.
     """
-
 	# set the log-likelihood to zero
 	logl = 0
 
@@ -620,22 +633,27 @@ def lnpostfn_photo_noAGN(theta, P, modelDust, modelPAH, UL, y, ey, wei):
 	logl += -0.5*(theta[1]/P[1][1])**2.
 
 	# Constraint on the 0.1 dex between the PAH and the dust continuum
-	logl += -0.5*((theta[1] + P[1][0] - (0.97 * (theta[0] + P[0][0]) - 0.95))/0.1)**2.
+	logl += -0.5*(((theta[1] + P[1][0]) - (0.97 * (theta[0] + P[0][0]) - 0.95))/0.1)**2.
 
 	# define the full model as PAH + dust continuum
 	ym = 10**(theta[0] + P[0][0]) * modelDust + 10**(theta[1] + P[1][0]) * modelPAH
 
 	# Upper Limits
-	x = 3.*(ym[UL == 1.] - y[UL == 1.])/y[UL == 1.]/np.sqrt(2)
-	logl += np.sum(1. - (0.5 * (1. + nberf(x))) * wei[UL == 1.])
+	x = (ym[UL == 1.] - y[UL == 1.])/y[UL == 1.]/np.sqrt(2) * 3.
+	cdf = np.prod(1. - (0.5 * (1. + nberf(x))))
+
+	if cdf == 0.:	
+		logl += -1e10
+	else:
+		logl += np.log(cdf)
 
 	# Detected fluxes
-	logl += np.sum(-0.5 * ((y[UL == 0.] - ym[UL == 0.])/ey[UL == 0.])**2. * wei[UL == 0.])
+	logl += np.sum(-0.5 * ((y[UL == 0.] - ym[UL == 0.])/(ey[UL == 0.]))**2.)
 
 	return logl
 
 @njit(fastmath=True)
-def lnpostfn_photo_wAGN(theta, P, modelDust, modelPAH, modelAGN, modelSi, UL, y, ey, wei):
+def lnpostfn_photo_wAGN(theta, P, modelDust, modelPAH, modelAGN, modelSi, UL, y, ey):
 	
 	"""
     This function calculates the log-likelihood between photometric data and model that includes AGN contribution.
@@ -647,9 +665,8 @@ def lnpostfn_photo_wAGN(theta, P, modelDust, modelPAH, modelAGN, modelSi, UL, y,
     :param modelAGN: model AGN continuum template.
     :param modelSi: model silicate emission template.
     :param UL: vector contaning the upper-limits, if any.
-    :param fluxFit: observed fluxes.
-    :param efluxFit: uncertainties on the observed fluxes.
-    :param wei: weighting of the data points.
+    :param y: observed fluxes.
+    :param ey: uncertainties on the observed fluxes.
     ------------
     :return logl: log-likelihood of the model knowing the parameters theta.
     """
@@ -660,28 +677,34 @@ def lnpostfn_photo_wAGN(theta, P, modelDust, modelPAH, modelAGN, modelSi, UL, y,
 	logl += -0.5*(theta[0]/P[0][1])**2.
 		
 	# prior constrain on the normalisation of the PAH
-	logl += -0.5*(theta[1])**2./P[1][1]**2.
+	logl += -0.5*(theta[1]/P[1][1])**2.
 
 	# constrain on 0.3 dex between the normalisation of the dust to that of PAHs
-	logl += -0.5*((theta[1] + P[1][0] - (0.97 * (theta[0] + P[0][0]) - 0.95))/0.1)**2.
+	logl += -0.5*((theta[1] + P[1][0] - (0.97 * (theta[0] + P[0][0]) - 0.95))/0.01)**2.
 
 	# prior constrain on the normalisation of the AGN continuum
 	logl += -0.5*(theta[2]/P[2][1])**2.
 
-	# prior constrain on the normalisation of the silicate emission
-	if theta[3] > 10.:
-		return -np.inf
-	logl += -0.5*(theta[3]/P[3][1])**2.
+	# prior constraint on the normalisation of the silicate emission
+	if np.sum(modelSi) != 0.:
+		logl += -0.5*(theta[3]/P[3][1])**2.
+	else:
+		theta[3] = 0.
 
 	# define the full model as PAH + dust continuum + AGN continuum + silicate emission
 	ym = 10**(theta[0] + P[0][0]) * modelDust + 10**(theta[1] + P[1][0]) * modelPAH + 10**(theta[2] + P[2][0]) * modelAGN + 10**(theta[3] + P[3][0]) * modelSi
 
 	# Upper Limits
-	x = 3.*(ym[UL == 1.] - y[UL == 1.])/y[UL == 1.]/np.sqrt(2)
-	logl += np.sum(1. - (0.5 * (1. + nberf(x))) * wei[UL == 1.])
+	x = (ym[UL == 1.] - y[UL == 1.])/y[UL == 1.]/np.sqrt(2) * 3.
+	cdf = np.prod(1. - (0.5 * (1. + nberf(x))))
+
+	if cdf == 0.:	
+		logl += -1e20
+	else:
+		logl += np.log(cdf)
 
 	# Detected fluxes
-	logl += np.sum(-0.5 * ((y[UL == 0.] - ym[UL == 0.])/ey[UL == 0.])**2. * wei[UL == 0.])
+	logl += np.sum(-0.5 * ((y[UL == 0.] - ym[UL == 0.])/(ey[UL == 0.]))**2.)
 
 	return logl
 
@@ -693,7 +716,7 @@ def runSEDphotFit(lambdaObs, fluxObs, efluxObs, \
 				  ExtCurve = 'iragnsep', \
 				  Nmc = 10000, pgrbar = 1, \
 				  NoSiem = False, \
-				  Pdust = [10., 3.], PPAH = [9., 3.], PnormAGN = [10., 3.], PSiEm = [10., 3.], \
+				  Pdust = [10., 1.], PPAH = [9., 1.], PnormAGN = [10., 1.], PSiEm = [10., 1.], \
 				  templ = '', \
 				  NOAGN = False):
 
@@ -701,8 +724,8 @@ def runSEDphotFit(lambdaObs, fluxObs, efluxObs, \
     This function fits the observed photometric SED.
     ------------
     :param lambdaObs: observed wavelengths (in microns).
-    :param fluxSpec: observed fluxes (in Jansky).
-    :param efluxSpec: observed uncertainties on the fluxes (in Jansky).
+    :param fluxObs: observed fluxes (in Jansky).
+    :param efluxObs: observed uncertainties on the fluxes (in Jansky).
     :param filters: name of the photometric filters to include in the fit.
     ------------
     :keyword z: redshift of the source. Default = 0.01.
@@ -713,11 +736,11 @@ def runSEDphotFit(lambdaObs, fluxObs, efluxObs, \
     :keyword Nmc: numer of MCMC run. Default = 10000.
     :keyword pgrbar: if set to 1, display a progress bar while fitting the SED. Default = 1.
 	:keyword NoSiem: if set to True, no silicate emission template is included in the fit. Default = False.
-    :keyword Pdust: normal prior on the log-normalisation of the galaxy dust continuum template. Default = [10., 3.] ([mean, std dev]).
-    :keyword PPAH: normal prior on the log-normalisation of the PAH template. Default = [9., 3.] ([mean, std dev]).
-    :keyword PnormAGN: normal prior on the log-normalisation of the AGN template. Default = [10., 3.] ([mean, std dev]).
-    :keyword PSiem: normal prior on the log-normalisation of the silicate emission template. Default = [10., 3.] ([mean, std dev]).
-    :keyword templ: normal prior on the log-normalisation of the silicate emission template. Default = [10., 3.] ([mean, std dev]).
+    :keyword Pdust: normal prior on the log-normalisation of the galaxy dust continuum template. Default = [10., 1.] ([mean, std dev]).
+    :keyword PPAH: normal prior on the log-normalisation of the PAH template. Default = [9., 1.] ([mean, std dev]).
+    :keyword PnormAGN: normal prior on the log-normalisation of the AGN template. Default = [10., 1.] ([mean, std dev]).
+    :keyword PSiem: normal prior on the log-normalisation of the silicate emission template. Default = [10., 1.] ([mean, std dev]).
+    :keyword templ: the templates used for the fits. Default: iragnsep templates.
     :keyword NOAGN: if set to True, fits are ran with SF templates only (i.e. no AGN emission is accounted for). Default = False.
 	------------
     :return dfRes: dataframe containing the results of all the possible fits.
@@ -757,7 +780,11 @@ def runSEDphotFit(lambdaObs, fluxObs, efluxObs, \
 	except:
 		raise ValueError('Rename the wavelengths column of the template "lambda_mic".')
 
-	# Open the extincrtion curve
+	# Increase the uncertainties if too small. Otherwise walkers get lost.
+	SNR = efluxObs/fluxObs
+	efluxObs[SNR < 1e-2] = fluxObs[SNR < 1e-2] * 1e-2
+
+	# Open the extinction curve
 	EC_wav, EC_tau = getExtCurve(ExtCurve)
 	EC_wav_AGN, EC_tau_AGN = getExtCurve('PAHfit')
 	if S9p7 > 0.:
@@ -775,22 +802,6 @@ def runSEDphotFit(lambdaObs, fluxObs, efluxObs, \
 	else:
 		obsPerWav_gal = 1.
 		obsPerWav_AGN = 1.
-
-	# calculate the uncertainties on the fluxes
-	unc = efluxObs/fluxObs
-
-	# define the weighting accordingly
-	if len(lambdaObs) > 1.:
-		wei = np.ones(len(lambdaObs))
-		wei_i = np.ones(len(lambdaObs))
-		wei_final = np.ones(len(lambdaObs))
-		o = np.where(unc > 0.)[0]
-		wei_i[o] = 1./unc[o]**2./np.sum(1./unc[o]**2.)
-		wei[o] = (1./wei_i[o])/np.sum(1./wei_i[o]) * 10.
-		wei_final = wei*np.gradient(lambdaObs) * 10.
-	else:
-		wei = np.ones(len(lambdaObs))
-		wei_final = np.ones(len(lambdaObs))
 
 	# Define a vectors of zeros if no upper limts are passed.
 	if len(UL) != len(lambdaObs):
@@ -833,13 +844,14 @@ def runSEDphotFit(lambdaObs, fluxObs, efluxObs, \
 
 	# We loop over the 6 galaxy templates, first fitting only galaxy templates and then including the AGN templates.
 	for name_i in nameTempl_gal:
+		# if name_i != 'gal7_dust':
+		# 	continue
 		assert isinstance(name_i, str), "The list nameTempl requests strings as it corresponds to the names" + \
 										" given to the various templates of galaxies to use for the fit."
 
 		if pgrbar == 1:
 			print("****************************************")
-			print("  Fit of "+name_i+" as galaxy template  ")
-			print("****************************************")
+			print("Fit of "+name_i+" as galaxy template")
 
 
 		# Define synthetic fluxes for the dust continuum model at the observed wavelength to match the observed fluxes
@@ -865,18 +877,20 @@ def runSEDphotFit(lambdaObs, fluxObs, efluxObs, \
 
 		# Perform the fit without the AGN contribution
 		ndim = 2 # Number of free params
-		nwalkers = int(2. * ndim) # Number of walkers
+		nwalkers = int(10. * ndim) # Number of walkers
 
-		# Define the parameters as flat distributions between -1 and 1. (We normalised to zero each parameters to ease convergence).
+		# Define the parameters as flat distributions between -3. and 3. (We normalised to zero each parameters to ease convergence).
 		parms = np.zeros(shape=(nwalkers, ndim))
-		parms[:,0] = np.random.uniform(low = -0.3, high = 0.3, size=nwalkers) # norm Dust
-		parms[:,1] = np.random.uniform(low = -0.3, high = 0.3, size=nwalkers) # norm PAH
+		parms[:,0] = np.random.uniform(low = -1. * Pdust[1], high = Pdust[1], size=nwalkers) # norm Dust
+		parms[:,1] = np.random.uniform(low = -1. * PPAH[1], high = PPAH[1], size=nwalkers) # norm PAH
 
 		# Set the ensemble sampler of Goodman&Weare and run the MCMC for Nmc steps
+		if pgrbar == 1:
+			print(" -- NO AGN --")
 		sampler = EnsembleSampler(nwalkers, ndim, lnpostfn_photo_noAGN, \
-								  moves=[emcee.moves.StretchMove(a = 2.)],\
-								  args = (np.array([Pdust, PPAH]), modelDust, modelPAH, UL, fluxObs, efluxObs, wei))
-		sampler.run_mcmc(parms, Nmc, progress=bool(pgrbar))
+								  moves=[emcee.moves.StretchMove()], \
+								  args = (np.array([Pdust, PPAH]), modelDust, modelPAH, UL, fluxObs, efluxObs))
+		sampler.run_mcmc(parms, int(Nmc), progress=bool(pgrbar))
 
 		# Build the flat chain, after burning 20% of the chain and thinning to every 10 values.
 		NburnIn = int(0.2 * Nmc)
@@ -884,16 +898,15 @@ def runSEDphotFit(lambdaObs, fluxObs, efluxObs, \
 
 		# Save the best fit parameters. Median of the posterior is taken as the best fit parameter and the standard deviation as 1sigma uncertainties.
 		# Norm dust continuum
-		lnDust_perTempl.append(round(np.median(chain[:,0]),3))
-		elnDust_perTempl.append(round(np.std(chain[:,0]),3))
+		lnDust_perTempl.append(np.median(chain[:,0]))
+		elnDust_perTempl.append(np.std(chain[:,0]))
 
 		# Norm PAH emission (or -20. when the empirical template is used).
-		lnPAH_perTempl.append(round(np.median(chain[:,1]),3))
-		elnPAH_perTempl.append(round(np.std(chain[:,1]),3))
+		lnPAH_perTempl.append(np.median(chain[:,1]))
+		elnPAH_perTempl.append(np.std(chain[:,1]))
 
 		# Calulate the final loglikelihood of the model, using the best fit parameters.
-		logl_perTempl.append(round(lnpostfn_photo_noAGN(np.array([lnDust_perTempl[-1], lnPAH_perTempl[-1]]), np.array([Pdust, PPAH]), \
-								   modelDust, modelPAH, UL, fluxObs, efluxObs, wei_final),3))
+		logl_perTempl.append(lnpostfn_photo_noAGN(np.array([lnDust_perTempl[-1], lnPAH_perTempl[-1]]), np.array([Pdust, PPAH]), modelDust, modelPAH, UL, fluxObs, efluxObs))
 		
 		# Norm on the silicate emission. -99. here since no AGN is accounted for.
 		lnSi_perTempl.append(-99.)
@@ -945,47 +958,58 @@ def runSEDphotFit(lambdaObs, fluxObs, efluxObs, \
 
 				# Perform the fit with the AGN contribution
 				ndim = 4 # Number of parmameters
-				nwalkers = int(2. * ndim) # Number of walkers
+				nwalkers = int(10. * ndim) # Number of walkers
 
 				# Define the starting parameters as flat distributions between -1 and 1. We normalised each parameter to zero to each convergence.
 				parms = np.zeros(shape=(nwalkers, ndim))
-				parms[:,0] = np.random.uniform(low = -0.3, high = 0.3, size=nwalkers) # norm Dust
-				parms[:,1] = np.random.uniform(low = -0.3, high = 0.3, size=nwalkers) # norm PAH
-				parms[:,2] = np.random.uniform(low = -0.3, high = 0.3, size=nwalkers) # normAGN
-				parms[:,3] = np.random.uniform(low = -0.3, high = 0.3, size=nwalkers) # normSi
+				parms[:,0] = np.random.uniform(low = -1. * Pdust[1], high = Pdust[1], size=nwalkers) # norm Dust
+				parms[:,1] = np.random.uniform(low = -1. * PPAH[1], high = PPAH[1], size=nwalkers) # norm PAH
+				parms[:,2] = np.random.uniform(low = -1. * PnormAGN[1], high = PnormAGN[1], size=nwalkers) # normAGN
+				parms[:,3] = np.random.uniform(low = -1. * PSiEm[1], high = PSiEm[1], size=nwalkers) # normSi
 
-				# Set the ensemble sampler of Goodman&Weare and run the MCMC for Nmc steps.
+				# Set the ensemble sampler of Goodman&Weare and run the MCMC for Nmc steps
+				print('-- ' + AGN_i + ' --')
 				sampler = EnsembleSampler(nwalkers, ndim, lnpostfn_photo_wAGN, \
-										  moves=[emcee.moves.StretchMove(a = 2.)],\
+										  moves=[emcee.moves.StretchMove()],\
 										  args = (np.array([Pdust, PPAH, PnormAGN, PSiEm]), \
-										  modelDust, modelPAH, modelAGN, modelSiem, UL, fluxObs, efluxObs, wei))
-				sampler.run_mcmc(parms, Nmc, progress=bool(pgrbar))
+										  modelDust, modelPAH, modelAGN, modelSiem, UL, fluxObs, efluxObs))
+				sampler.run_mcmc(parms, int(Nmc), progress=bool(pgrbar))
 
 				# Build the flat chain, after burning 20% of the chain and thinning to every 10 values in the chain.
 				chain = sampler.get_chain(discard=NburnIn, thin=10, flat=True)
 
-
 				# Save the best fit parameters. Median of the posterior is taken as the best fit parameter and the standard
 				# deviation as 1sigma uncertainties.
 				# Dust Normalisation
-				lnDust_perTempl.append(round(np.median(chain[:,0]),3))
-				elnDust_perTempl.append(round(np.std(chain[:,0]),3))
+				lnDust_perTempl.append(np.median(chain[:,0]))
+				elnDust_perTempl.append(np.std(chain[:,0]))
 
 				# PAH normalisation
-				lnPAH_perTempl.append(round(np.median(chain[:,1]),3))
-				elnPAH_perTempl.append(round(np.std(chain[:,1]),3))
+				lnPAH_perTempl.append(np.median(chain[:,1]))
+				elnPAH_perTempl.append(np.std(chain[:,1]))
 				
 				# AGN continuum Norm
-				lnAGN_perTempl.append(round(np.median(chain[:,2]),3))
-				elnAGN_perTempl.append(round(np.std(chain[:,2]),3))
+				lnAGN_perTempl.append(np.median(chain[:,2]))
+				elnAGN_perTempl.append(np.std(chain[:,2]))
 
-				# Si emission Norm
-				lnSi_perTempl.append(round(np.median(chain[:,3]),3))
-				elnSi_perTempl.append(round(np.std(chain[:,3]),3))
-				
-				# Numbers of params in the model
-				nParms.append(4.)
-	 
+				if NoSiem == True:
+					
+					# Si emission Norm
+					lnSi_perTempl.append(-99.)
+					elnSi_perTempl.append(-99.)
+
+					# Numbers of params in the model
+					nParms.append(3.)
+
+				else:
+
+					# Si emission Norm
+					lnSi_perTempl.append(np.median(chain[:,3]))
+					elnSi_perTempl.append(np.std(chain[:,3]))
+
+					# Numbers of params in the model
+					nParms.append(4.)
+
 				# AGN accounted for in this case, so AGNon = 1
 				AGNon.append(1.)
 
@@ -996,14 +1020,12 @@ def runSEDphotFit(lambdaObs, fluxObs, efluxObs, \
 				tplNameAGN_perTempl.append(AGN_i)
 
 				# loglikelihood of the model
-				logl_perTempl.append(round(lnpostfn_photo_wAGN(np.array([lnDust_perTempl[-1], lnPAH_perTempl[-1], lnAGN_perTempl[-1], \
+				logl_perTempl.append(lnpostfn_photo_wAGN(np.array([lnDust_perTempl[-1], lnPAH_perTempl[-1], lnAGN_perTempl[-1], \
 										   lnSi_perTempl[-1]]), np.array([Pdust, PPAH, PnormAGN, PSiEm]), modelDust, modelPAH, modelAGN, \
-										   modelSiem, UL, fluxObs, efluxObs, wei_final),3))
+										   modelSiem, UL, fluxObs, efluxObs))
 
 				if NoSiem == True:
-					lnSi_perTempl[-1] = -20.
-					elnSi_perTempl[-1] = 0.0
-
+					lnSi_perTempl[-1] = -99.
 
 	# Find the best model and the Akaike weight amongst all the 18 possible fits by comparing their final loglikelihood
 	bestModelInd, Awi = exctractBestModel(logl_perTempl, nParms, len(lambdaObs), corrected = True)
@@ -1011,10 +1033,10 @@ def runSEDphotFit(lambdaObs, fluxObs, efluxObs, \
 	bestModelFlag[bestModelInd] = 1
 
 	# Save the results in a table
-	resDict = {'logNormGal_dust': np.array(lnDust_perTempl) + Pdust[0], 'elogNormGal_dust': np.abs(np.array(elnDust_perTempl)), \
-			   'logNormGal_PAH': np.array(lnPAH_perTempl) + PPAH[0], 'elogNormGal_PAH': np.abs(np.array(elnPAH_perTempl)), \
-			   'logNormAGN': np.array(lnAGN_perTempl) + PnormAGN[0], 'elogNormAGN': np.abs(np.array(elnAGN_perTempl)), \
-			   'logNormSiem': np.array(lnSi_perTempl) + PSiEm[0], 'elogNormSiem': np.abs(np.array(elnSi_perTempl)), \
+	resDict = {'logNormGal_dust': np.array(lnDust_perTempl) + Pdust[0], 'elogNormGal_dust': np.array(elnDust_perTempl), \
+			   'logNormGal_PAH': np.array(lnPAH_perTempl) + PPAH[0], 'elogNormGal_PAH': np.array(elnPAH_perTempl), \
+			   'logNormAGN': np.array(lnAGN_perTempl) + PnormAGN[0], 'elogNormAGN': np.array(elnAGN_perTempl), \
+			   'logNormSiem': np.array(lnSi_perTempl) + PSiEm[0], 'elogNormSiem': np.array(elnSi_perTempl), \
 			   'logl': logl_perTempl, 'AGNon': AGNon, 'tplName_gal': tplNameGal_perTempl, 'tplName_AGN': tplNameAGN_perTempl,\
 			   'bestModelFlag': bestModelFlag, 'Aw': Awi, 'S9p7':S9p7}
 

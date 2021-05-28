@@ -1,7 +1,7 @@
 Metadata-Version: 2.1
 Name: iragnsep
-Version: 7.2.0
-Summary: Fits of IR SEDs, including AGN contribution.
+Version: 7.3.0
+Summary: Fits of IR SEDs including AGN contribution.
 Home-page: https://tinyurl.com/y9phjhxy
 Author: Emmanuel Bernhard
 Author-email: manu.p.bernhard@gmail.com
@@ -10,15 +10,15 @@ Description: # iragnsep
         
         iragnsep performs IR (i.e. 8--1000 microns) SED fits, separated into AGN and galaxy contributions, and measure host galaxy properties (e.g. SFRs) free of AGN contamination. The advantage of iragnsep is that, in addition to fitting observed broadband photometric fluxes, it also allows to incorporate IR spectra in the fits which, if available, improves the robustness of the galaxy-AGN separation. 
         
-        For the galaxy component iragnsep uses a library of galaxy templates built and presented in Bernhard et al. (in prep.). In terms of the AGN contribution, if the input dataset is a mixture of spectral and photometric data, iragnsep uses a combination of power-laws for the AGN continuum, and some broad features for the silicate emission. If, instead, the dataset contains photometric data alone, the AGN contribution is accounted for by using the library of AGN templates presented in Bernhard et al. (in prep.).
+        For the galaxy component iragnsep uses a library of galaxy templates built and presented in [Bernhard et al. (2021)](https://ui.adsabs.harvard.edu/abs/2021MNRAS.503.2598B/abstract). In terms of the AGN contribution, if the input dataset is a mixture of spectral and photometric data, iragnsep uses a combination of power-laws for the AGN continuum, and some broad features for the silicate emission. If, instead, the dataset contains photometric data alone, the AGN contribution is accounted for by using the library of AGN templates presented in Bernhard et al. (2021).
         
         The advanced fitting techniques used by iragnsep (i.e. MLE optimised with MCMC) combined with the powerful model comparison tests (i.e. AIC) allow iragnsep to provide a statistically robust interpretation of IR SEDs in terms of AGN–galaxy contributions, even when the AGN contribution is highly diluted by the host galaxy emission.
         
         The aim of this README is to show how to use iragnsep. This document also contains important information such as limitations and cautions.
         
-        For a detailed description on the templates and fitting technique, see Bernhard et al. (in prep.).
+        For a detailed description on the templates and fitting technique, see [Bernhard et al. (2021)](https://ui.adsabs.harvard.edu/abs/2021MNRAS.503.2598B/abstract).
         
-        Contacts: e.p.bernhard[at]sheffield.ac.uk
+        Contacts: e.p.bernhard[at]sheffield.ac.uk (until 31/08/2021); manu.p.bernhard@gmail.com
         
         ## Getting Started
         These instructions should assist you in getting iragnsep running on your machine. iragnsep is written for python 3 and is available on PyPI.
@@ -72,17 +72,18 @@ Description: # iragnsep
         * **IC5063_fitResBM_photo.pdf** - shows the best fit to the photometric data. The best fit corresponds to a statistically weighted sum of all of the 21 different models.
         
         ## Preparing your data
-        As this is the first public release of iragnsep it is important to make sure that the input data are compatible with the code. Future versions will allow more flexibility in the format of the input data. The main input are the wavelengths of the SED (or combined spectrum and photometry) and the corresponding fluxes and their uncertainties. Here is a (non-exhaustive) check list of points that are required to ensure a robust behaviour of iragnsep.
+        It is important to make sure that the input data are compatible. Future work will focus on allowing more flexibility in the format of the input data. The main input are the wavelengths of the SED (or combined spectrum and photometry) and the corresponding fluxes and their uncertainties. Here is a (non-exhaustive) check list of points that are required to ensure a robust behaviour of iragnsep.
         
         * the wavelengths are in microns, the fluxes and the uncertainties are in Jy.
         * the vector wavelength is in monotonically increasing order.
         * their is no negative or undefined (e.g. nan) values in the fluxes and their uncertainties (upper-limits can be passed via the keywords ULphot).
         * if using iragnsep with a combination of a spectrum and photometry, make sure that no photometric points are overlapping with the spectral data (e.g. IRS spectra and MIPS 24 micron would be overlapping).
-        * a good value for Nmc (the number of steps in the MCMC) which esnure convergence is at least 50000 steps when the spectrum is included, and 10000 if used with photometric data only.
+        * a good value for Nmc (the number of steps in the MCMC) which ensure convergence is probably 50000 steps, when the spectrum is included, and 20000 if used with photometric data only.
         * do not forget to set the redshift of the source using the keyword z.
         * for the photometric version, avoid photometry below roughly 5 microns rest-frame as iragnsep has not been designed to account for emissions below this value (e.g. old stellar population).
+        * when using the photometric version, if returning some weird fits, check the uncertainties on the fluxes, and make sure that the SED is not too much of a mixture fluxes with very low and very high uncertainties.
         
-        Should you find anything non-intuitive missing from the above list, contact us at: e.p.bernhard[at]sheffield.ac.uk
+        Should you find anything non-intuitive missing from the above list, or still have a problem fitting your data, contact us at: e.p.bernhard[at]sheffield.ac.uk (manu.p.bernhard[at]gmail.com)
         
         ## Description of the tables
         
@@ -111,7 +112,6 @@ Description: # iragnsep
         * **AGNfrac_MIR** - the fraction of the total MIR luminosity which is attributed to the AGN, and its uncertainties.
         * **AGNfrac_FIR** - the fraction of the total FIR luminosity which is attributed to the AGN, and its uncertainties.
         * **SFR, eSFR** - the star formation rate free of AGN contamination, and its uncertainties.
-        * **wSFR, ewSFR** - the weighted star formation rate free of AGN contamination, and its uncertainties.
         * **logl** - the loglikelihood of the fit given the model.
         * **Aw** - the Akaike weight of the model.
         * **S9p7** - the total extinction at 9.7 micron.
@@ -136,7 +136,6 @@ Description: # iragnsep
         * **AGNfrac_MIR** - the fraction of the total MIR luminosity which is attributed to the AGN, and its uncertainties.
         * **AGNfrac_FIR** - the fraction of the total FIR luminosity which is attributed to the AGN, and its uncertainties.
         * **SFR, eSFR** - the star formation rate free of AGN contamination, and its uncertainties.
-        * **wSFR, ewSFR** - the weighted star formation rate free of AGN contamination, and its uncertainties.
         * **logl** - the loglikelihood of the fit given the model.
         * **Aw** - the Akaike weight of the model.
         * **S9p7** - the total extinction at 9.7 micron.
@@ -163,6 +162,7 @@ Description: # iragnsep
         
         The available filters are as follow:
         
+        * **ISOPHTC100** - ISO PHT-P, 100 micron, http://svo2.cab.inta-csic.es/theory/fps/index.php?mode=browse&gname=ISO
         * **IRAC1** - Spitzer IRAC, 3.6 micron, http://svo2.cab.inta-csic.es/theory/fps/index.php?mode=browse&gname=Spitzer
         * **IRAC2** - Spitzer IRAC, 4.5 micron, http://svo2.cab.inta-csic.es/theory/fps/index.php?mode=browse&gname=Spitzer
         * **IRAC3** - Spitzer IRAC, 5.8 micron, http://svo2.cab.inta-csic.es/theory/fps/index.php?mode=browse&gname=Spitzer
@@ -184,13 +184,13 @@ Description: # iragnsep
         * **SPIRE350ps** - Herschel SPIRE, 350 micron, http://svo2.cab.inta-csic.es/theory/fps/index.php?mode=browse&gname=Herschel&gname2=SPIRE
         * **SPIRE500ps** - Herschel SPIRE, 500 micron, http://svo2.cab.inta-csic.es/theory/fps/index.php?mode=browse&gname=Herschel&gname2=SPIRE
         
-        Note: to add filters please contact us at: e.p.bernhard[at]sheffield.ac.uk.
+        Note: to add filters please contact us.
         
         -- --
         
         ## Cautionary notes
         
-        As this is the first public release of iragnsep we suggest the user to carefully check the results, and to report anything that is possibly a bug. To do this, please contact us at: e.p.bernhard[at]sheffield.ac.uk.
+        Please report anything that is possibly a bug at e.p.bernhard[at]sheffield.ac.uk.
         
         The templates and models built for iragnsep are based on observations out to z~0.3. We have tested these on photometry of galaxies in the COSMOS field at higher redshifts, and the results appear to be reliable. However, there is no formal proof, and we suggest that the user carefully check results for these sources.
         
@@ -209,6 +209,16 @@ Description: # iragnsep
         We use three numbers for the versions defined as x.y.z. If only y and z are changed the output of iragnsep is unchanged and minor patches are applied. If x changes it means that major changes have been applied, and results are likely to differ from the x-1 version. We strongly advice to specify which version of iragnsep has been used for future reference. 
         
         The first official released version starts at x=7.
+        
+        ## Change log
+        
+        V7.2.0 => V7.3.0:
+        - Fixed typo in the formulae for upper limits while calculating likelihood.
+        - Improved the display of figures.
+        - plot 3 sigma uncertainties to better visualise what iragnsep is "seeing" in the fit.
+        - improved the tables reporting the results of the fits.
+        - Included the possibility to perform fits with minimum FIR (or upper limits only; longer than 100 microns) data. For these SFRs are returned as upper limits.
+        - Included the possibility to perform fits with minimum MIR data for the photometric version. For these, the AGN templates are excluded, and SFRs are returned as upper limits.
         
         ## Authors
         
@@ -232,5 +242,5 @@ Platform: UNKNOWN
 Classifier: Programming Language :: Python :: 3
 Classifier: License :: OSI Approved :: MIT License
 Classifier: Operating System :: OS Independent
-Requires-Python: >=3.6
+Requires-Python: >=3.7
 Description-Content-Type: text/markdown

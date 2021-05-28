@@ -56,7 +56,10 @@ def basictests(wavSpec, fluxSpec, efluxSpec, wavPhot, fluxPhot, efluxPhot, filte
 		#test that there are NAN
 		if (any(fluxSpec != fluxSpec) == True) or (any(efluxSpec != efluxSpec) == True) or (any(wavSpec != wavSpec) == True):
 			raise ValueError("SPECTRUM ISSUE: Crash caused by some non-numerical values in the wavelengths, fluxes or uncertainties on the fluxes.")
-
+		#test that no photometry overlap with the spectral data
+		if len(wavPhot[(wavPhot > wavSpec.min()) & (wavPhot < wavSpec.max())]) > 0.:
+			raise ValueError("SPECTRUM/PHOTOMETRY ISSUE: Crash caused because there are some photometric data overlapping with the spectral data.")
+	
 	#test if the filter exists
 	path = os.path.dirname(iragnsep.__file__) + '/Filters/'
 	files = [f for f in glob.glob(path + "*.csv")]
@@ -65,9 +68,9 @@ def basictests(wavSpec, fluxSpec, efluxSpec, wavPhot, fluxPhot, efluxPhot, filte
 		count += 1
 		if (f in files) == False:
 			raise ValueError(" \n The filter "+ str(filters[count]) + " does not exist. This version does not allow you to add some filters." + \
-							 " Please get in touch with us to add the required filters (e.p.bernhard@sheffield.ac.uk). Available filters are:" +\
+							 " Please get in touch with us to add the required filters (manu.p.bernhard[at]gmail.com). Available filters are:" +\
 							 " IRAC1 , IRAC2 , IRAC3 , IRAC4 , WISE_W1 , WISE_W2 , WISE_W3 , WISE_W4 , IRAS12, IRAS60, IRAS100 , MIPS24, MIPS70," +\
-							 " MIPS160 , PACS70, PACS100 , PACS160, SPIRE250ps , SPIRE350ps , SPIRE500ps")
+							 " MIPS160 , PACS70, PACS100 , PACS160, SPIRE250ps , SPIRE350ps , SPIRE500ps, ISOPHTC100")
 
 	#Test if the redshift has been given by the user
 	if z<0:
@@ -111,7 +114,7 @@ def basictests(wavSpec, fluxSpec, efluxSpec, wavPhot, fluxPhot, efluxPhot, filte
 			if len(wavPhot) == 3:
 				restWav = wavPhot/(1.+z)
 				NFIR = len(np.where(restWav>50.)[0])
-				if (NFIR > 0.) & (NFIR != len(wavPhot)):
+				if (NFIR > 0.):
 					pass
 				else:
 					raise ValueError('There is not enough data points to fit the model when compared to the number of degrees of freedom. It needs a minimum of' + \
@@ -121,8 +124,7 @@ def basictests(wavSpec, fluxSpec, efluxSpec, wavPhot, fluxPhot, efluxPhot, filte
 				raise ValueError('There is not enough data points to fit the model when compared to the number of degrees of freedom. It needs a minimum of' + \
 								 ' 3 photometric points, with at least 1 FIR (i.e. rest-wavelength>60micron) flux, including upper-limits.')
 
-
-def get_prop(df, z = 0.01, specOn = True, templ = ''):
+def get_prop(df, z = 0.01, specOn = True, templ = '', NOAGN = False):
 
 	"""
     This function calculates the IR properties of the AGN and their hosts.
@@ -147,8 +149,6 @@ def get_prop(df, z = 0.01, specOn = True, templ = ''):
 	:return AGNfrac_FIR: the AGN fraction in the FIR.
 	:return SFR: the SFR of the galaxy free of AGN contamination.
 	:return eSFR: the uncertainties on SFR.
-	:return wSFR: the SFR of the galaxy free of AGN contamination weighted by its Akaike weight.
-	:return ewSFR: the uncertainties on wSFR.
     """
 	if len(templ) == 0:
 		path = os.path.dirname(iragnsep.__file__)
@@ -209,16 +209,20 @@ def get_prop(df, z = 0.01, specOn = True, templ = ''):
 		obj = df.iloc[i]
 
 		normDust = 10**obj['logNormGal_dust']
+		enormDust = normDust * np.log(10) * obj['elogNormGal_dust']
+	
 		try:
 			nuLnuDust = normDust * templ[obj['tplName']].values
-			enuLnuDust = np.sqrt((nuLnuDust * np.log(10) * obj['elogNormGal_dust'])**2. + (normDust * templ['e'+obj['tplName']].values)**2.)
+			enuLnuDust = np.sqrt((enormDust * templ[obj['tplName']].values)**2. + (normDust * templ['e'+obj['tplName']].values)**2.)
 		except:
 			nuLnuDust = normDust * templ[obj['tplName_gal']].values
-			enuLnuDust = np.sqrt((nuLnuDust * np.log(10) * obj['elogNormGal_dust'])**2. + (normDust * templ['e'+obj['tplName_gal']].values)**2.)
+			enuLnuDust = np.sqrt((enormDust * templ[obj['tplName_gal']].values)**2. + (normDust * templ['e'+obj['tplName_gal']].values)**2.)
 
-		normPAH = obj['logNormGal_PAH']
+		normPAH = 10**obj['logNormGal_PAH']
+		enormPAH = normPAH * np.log(10) * obj['elogNormGal_PAH']
+		
 		nuLnuPAH = normPAH * templ['gal_PAH'].values
-		enuLnuPAH = np.sqrt((nuLnuPAH * np.log(10) * obj['elogNormGal_PAH'])**2. + (normPAH * templ['egal_PAH'].values)**2.)
+		enuLnuPAH = np.sqrt((enormPAH * templ['gal_PAH'].values)**2. + (normPAH * templ['egal_PAH'].values)**2.)
 
 		LnuGal = (nuLnuDust + nuLnuPAH)/nu
 		eLnuGal = np.sqrt(enuLnuDust**2. + enuLnuPAH**2.)/nu
@@ -226,52 +230,52 @@ def get_prop(df, z = 0.01, specOn = True, templ = ''):
 		lum_hostIR_k = []
 		lum_hostMIR_k = []
 		lum_hostFIR_k = []
-		for k in range(0, 1000):
-			lum_hostIR_k.append(np.trapz(np.random.normal(LnuGal[o_IR], eLnuGal[o_IR]), nu[o_IR], dx = np.gradient(nu[o_IR])))
-			lum_hostMIR_k.append(np.trapz(np.random.normal(LnuGal[o_MIR], eLnuGal[o_MIR]), nu[o_MIR], dx = np.gradient(nu[o_MIR])))
-			lum_hostFIR_k.append(np.trapz(np.random.normal(LnuGal[o_FIR], eLnuGal[o_FIR]), nu[o_FIR], dx = np.gradient(nu[o_FIR])))
 
-		loglum_hostIR.append(round(np.log10(np.median(lum_hostIR_k)),4))
-		eloglum_hostIR.append(round(0.434 * np.std(lum_hostIR_k)/np.median(lum_hostIR_k) * 5. ,4))
-		
-		loglum_hostMIR.append(round(np.log10(np.median(lum_hostMIR_k)),4))
-		eloglum_hostMIR.append(round(0.434 * np.std(lum_hostMIR_k)/np.median(lum_hostMIR_k) * 5. ,4))
+		loglum_hostIR.append(np.log10(np.sum(LnuGal[o_IR]*np.gradient(nu[o_IR]))))
+		eloglum_hostIR.append(np.sqrt(np.sum((np.gradient(nu[o_IR])*eLnuGal[o_IR])**2.))/10**loglum_hostIR[-1] * 0.434)
 
-		loglum_hostFIR.append(round(np.log10(np.median(lum_hostFIR_k)),4))
-		eloglum_hostFIR.append(round(0.434 * np.std(lum_hostFIR_k)/np.median(lum_hostFIR_k) * 5. ,4))
+		loglum_hostMIR.append(np.log10(np.sum(LnuGal[o_MIR]*np.gradient(nu[o_MIR]))))
+		eloglum_hostMIR.append(np.sqrt(np.sum((np.gradient(nu[o_MIR])*eLnuGal[o_MIR])**2.))/10**loglum_hostMIR[-1] * 0.434)
 
-		if obj['AGNon'] == 1:
-			if specOn == True:
+		loglum_hostFIR.append(np.log10(np.sum(LnuGal[o_FIR]*np.gradient(nu[o_FIR]))))
+		eloglum_hostFIR.append(np.sqrt(np.sum((np.gradient(nu[o_FIR])*eLnuGal[o_FIR])**2.))/10**loglum_hostFIR[-1] * 0.434)
 
-				modelPL = 10**(obj['logNormAGN_PL']) * contmodel(np.array([obj['lBreak_PL'], obj['alpha1'], obj['alpha2'], obj['alpha3']]), wavTempl)
-				modelSi11 = 10**(obj['logNorm_Si']) * Simodel(wavTempl, 11., obj['dSi'])
-				modelSi18 = 10**(obj['logNorm_Si']) * Simodel(wavTempl, 18., obj['dSi'])
+		if NOAGN == False:
+			if obj['AGNon'] == 1:
+				if specOn == True:
 
-				LnuAGN = (modelPL + modelSi11 + modelSi18) * JyToLsun
-				
-				loglum_AGNIR.append(round(np.log10(np.trapz(LnuAGN[o_IR], nu[o_IR], dx = np.gradient(nu[o_IR]))),3)) #Lsun
-				loglum_AGNMIR.append(round(np.log10(np.trapz(LnuAGN[o_MIR], nu[o_MIR], dx = np.gradient(nu[o_MIR]))),3)) #Lsun
-				loglum_AGNFIR.append(round(np.log10(np.trapz(LnuAGN[o_FIR], nu[o_FIR], dx = np.gradient(nu[o_FIR]))),3)) #Lsun
+					modelPL = 10**(obj['logNormAGN_PL']) * contmodel(np.array([obj['lBreak_PL'], obj['alpha1'], obj['alpha2'], obj['alpha3']]), wavTempl)
+					modelSi11 = 10**(obj['logNorm_Si']) * Simodel(wavTempl, 11., obj['dSi'])
+					modelSi18 = 10**(obj['logNorm_Si']) * Simodel(wavTempl, 18., obj['dSi'])
+
+					LnuAGN = (modelPL + modelSi11 + modelSi18) * JyToLsun
+					
+					loglum_AGNIR.append(np.round(np.log10(np.trapz(LnuAGN[o_IR], nu[o_IR], dx = np.gradient(nu[o_IR]))),3)) #Lsun
+					loglum_AGNMIR.append(np.round(np.log10(np.trapz(LnuAGN[o_MIR], nu[o_MIR], dx = np.gradient(nu[o_MIR]))),3)) #Lsun
+					loglum_AGNFIR.append(np.round(np.log10(np.trapz(LnuAGN[o_FIR], nu[o_FIR], dx = np.gradient(nu[o_FIR]))),3)) #Lsun
+
+				else:
+					#AGN IR luminosity
+					normAGN = 10**obj['logNormAGN']
+					nuLnuAGN = normAGN * templ[obj['tplName_AGN']].values
+
+					normSi = 10**obj['logNormSiem']
+					nuLnuSi = normSi * templ[nameTempl_Siem].values.flatten()
+
+					LnuAGN = (nuLnuAGN + nuLnuSi)/nu
+					
+					loglum_AGNIR.append(np.round(np.log10(np.trapz(LnuAGN[o_IR], nu[o_IR], dx = np.gradient(nu[o_IR]))),3)) #Lsun
+					loglum_AGNMIR.append(np.round(np.log10(np.trapz(LnuAGN[o_MIR], nu[o_MIR], dx = np.gradient(nu[o_MIR]))),3)) #Lsun
+					loglum_AGNFIR.append(np.round(np.log10(np.trapz(LnuAGN[o_FIR], nu[o_FIR], dx = np.gradient(nu[o_FIR]))),3)) #Lsun	
 
 			else:
-				#AGN IR luminosity
-				normAGN = 10**obj['logNormAGN']
-				nuLnuAGN = normAGN * templ[obj['tplName_AGN']].values
-
-				normSi = 10**obj['logNormSiem']
-				nuLnuSi = normSi * templ[nameTempl_Siem].values.flatten()
-
-				LnuAGN = (nuLnuAGN + nuLnuSi)/nu
-				
-				loglum_AGNIR.append(round(np.log10(np.trapz(LnuAGN[o_IR], nu[o_IR], dx = np.gradient(nu[o_IR]))),3)) #Lsun
-				loglum_AGNMIR.append(round(np.log10(np.trapz(LnuAGN[o_MIR], nu[o_MIR], dx = np.gradient(nu[o_MIR]))),3)) #Lsun
-				loglum_AGNFIR.append(round(np.log10(np.trapz(LnuAGN[o_FIR], nu[o_FIR], dx = np.gradient(nu[o_FIR]))),3)) #Lsun	
-
+				loglum_AGNIR.append(-99.)
+				loglum_AGNMIR.append(-99.)
+				loglum_AGNFIR.append(-99.)
 		else:
-
-			loglum_AGNIR.append(0.0)
-			loglum_AGNMIR.append(0.0)
-			loglum_AGNFIR.append(0.0)
+			loglum_AGNIR.append(-99.)
+			loglum_AGNMIR.append(-99.)
+			loglum_AGNFIR.append(-99.)
 
 	loglum_hostIR = np.array(loglum_hostIR)
 	eloglum_hostIR = np.array(eloglum_hostIR)
@@ -286,32 +290,26 @@ def get_prop(df, z = 0.01, specOn = True, templ = ''):
 
 	#AGN fractions
 	AGNfrac_IR = np.round(10**loglum_AGNIR/(10**loglum_hostIR + 10**loglum_AGNIR),2)
-	o = np.where(loglum_AGNIR == 0.)[0]
-	AGNfrac_IR[o] = 0.
+	o = np.where(loglum_AGNIR <= 0.)[0]
+	AGNfrac_IR[o] = -99.
 
 	AGNfrac_MIR = np.round(10**loglum_AGNMIR/(10**loglum_hostMIR + 10**loglum_AGNMIR),2)
-	o = np.where(loglum_AGNMIR == 0.)[0]
-	AGNfrac_MIR[o] = 0.
+	o = np.where(loglum_AGNMIR <= 0.)[0]
+	AGNfrac_MIR[o] = -99.
 
 	AGNfrac_FIR = np.round(10**loglum_AGNFIR/(10**loglum_hostFIR + 10**loglum_AGNFIR),2)
-	o = np.where(loglum_AGNFIR == 0.)[0]
-	AGNfrac_FIR[o] = 0.
+	o = np.where(loglum_AGNFIR <= 0.)[0]
+	AGNfrac_FIR[o] = -99.
 
 	# SFR
-	SFR = np.round(1.09e-10 * 10**loglum_hostIR,3)
-	eSFR = np.round(SFR * np.log(10) * eloglum_hostIR,3)
-	wSFR = np.round(SFR * df['Aw'].values,3)
-	ewSFR = np.round(eSFR * df['Aw'].values,3)
+	SFR = 1.09e-10 * 10**loglum_hostIR
+	eSFR = SFR * np.log(10) * eloglum_hostIR
 	
 	return loglum_hostIR, eloglum_hostIR, \
 		   loglum_hostMIR, eloglum_hostMIR, \
 		   loglum_hostFIR, eloglum_hostFIR, \
 		   loglum_AGNIR, loglum_AGNMIR, loglum_AGNFIR, \
-		   AGNfrac_IR, AGNfrac_MIR, AGNfrac_FIR, SFR, eSFR, wSFR, ewSFR
-
-
-
-
+		   AGNfrac_IR, AGNfrac_MIR, AGNfrac_FIR, SFR, eSFR
 
 def exctractBestModel(logl, k, n, corrected = True):
 
@@ -333,10 +331,9 @@ def exctractBestModel(logl, k, n, corrected = True):
 	if len(o) > 0:
 		corrected = False
 
+	AIC = 2*(np.array(k) - np.array(logl))
 	if corrected == True:
-		AIC = 2*np.array(k) - 2.*np.array(logl) + (2.*np.array(k)**2. + 2.*np.array(k))/(np.array(n)-np.array(k)-1.)
-	else:
-		AIC = 2*np.array(k) - 2.*np.array(logl)
+		AIC += (2.*np.array(k)**2. + 2.*np.array(k))/(np.array(n)-np.array(k)-1.)
 
 	bestModelInd = np.where(AIC == np.min(AIC))[0]
 	AICmin = AIC[bestModelInd][0]
@@ -345,9 +342,6 @@ def exctractBestModel(logl, k, n, corrected = True):
 	Awi = np.exp(-0.5 * (AIC-AICmin))/AwiNorm
 
 	return bestModelInd, Awi
-
-
-
 
 def nuLnuToFnu(wav, nuLnu, z):
 
@@ -372,8 +366,6 @@ def nuLnuToFnu(wav, nuLnu, z):
 
 	return Fnu * 1e26 # Jy
 
-
-
 def getFluxInFilt(filt_wav, filt_QE, wav_rest, nuLnu, z, Fnu = False):
 
 	"""
@@ -397,20 +389,16 @@ def getFluxInFilt(filt_wav, filt_QE, wav_rest, nuLnu, z, Fnu = False):
 	else:
 		Fnu_0 = nuLnu
 
-	lambda_0 = wav_rest * (1. + z) # Wavelenght of emission
+	lambda_0 = wav_rest * (1. + z) # Wavelength of emission
 	Fnu_0filt = np.interp(filt_wav, lambda_0, Fnu_0) # Move the template to grab the redshifted flux
 	flux_Obs = integrate.trapz(Fnu_0filt*filt_QE, x = c/filt_wav/1e-6)/norm # This is the flux received on Earth
 
 	return flux_Obs
 
-
-
-
-
 @njit(fastmath = True)
 def contmodel(theta, x):
 	"""
-    Same as the function contmodel but decorated with NUMBA.
+    This function returns the model for the AGN continuum.
     ------------
     :param theta: parameters of the model (lambdab, alpha1, alpha2, alpha3).
 	:param x: wavelengths.
@@ -426,7 +414,6 @@ def contmodel(theta, x):
 	Bnu[x >= 24.] = PLmodel(x[x >= 24.], lambdab, alpha3, -3.5, 2., 24.)*np.interp(24., x, Bnu)
 
 	return Bnu
-
 
 @njit(fastmath = True)
 def PLmodel(x, lambdab, alpha1, alpha2, s, norm):
@@ -450,8 +437,6 @@ def PLmodel(x, lambdab, alpha1, alpha2, s, norm):
 
 	return Bnu
 
-
-
 @njit(fastmath = True)
 def Simodel(x, p_w, dSi):
 
@@ -467,14 +452,15 @@ def Simodel(x, p_w, dSi):
 
 	alpha1 = 18.
 	alpha2 = -5.
-	lambdab = p_w + dSi - 1.
+	if p_w < 15.:
+		lambdab = p_w + dSi - 1.
+	if p_w > 15.:
+		lambdab = p_w + dSi - 1.4
 	s = 0.6
 
 	Bnu = x**alpha1*(1. + (x/lambdab)**(abs(alpha2-alpha1)*s))**(np.sign(alpha2-alpha1)/s)
 
 	return Bnu/Bnu.max()
-
-
 
 def drude(x, gamma_r, lambda_r, normed = True):
 	"""
@@ -496,8 +482,6 @@ def drude(x, gamma_r, lambda_r, normed = True):
 		return drudeVal/np.max(drudeVal)
 	else:
 		return np.max(drudeVal), drudeVal
-
-
 
 def calc_S9p7(wavRest, flux):
 	"""
@@ -538,11 +522,9 @@ def calc_S9p7(wavRest, flux):
 	else:
 		return S9p7
 
-
-
 def getExtCurve(ExtCurve):
 	"""
-    This function opens the write extinctin curve.
+    This function opens the right extinctin curve.
     ------------
     :param ExtCurve: contain the name of the extinction curve.
     ------------
@@ -560,7 +542,6 @@ def getExtCurve(ExtCurve):
 		EC = pd.read_csv(path_iragnsep+'/ExtCurves/CT06_extCurve.csv')
 
 	return EC['lambda_mic'].values, EC['tau'].values
-
 
 def S9p7toTau9p7(S9p7, source):
 	"""
@@ -584,6 +565,3 @@ def S9p7toTau9p7(S9p7, source):
 	if source == 'AGN':
 
 		return S9p7
-
-
-	
